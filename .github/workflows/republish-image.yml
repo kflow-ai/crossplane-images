@@ -1,0 +1,74 @@
+name: Republish Upstream Images
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read # Needed to read repository metadata
+  packages: write # Needed to push docker image packages to GHCR
+
+jobs:
+  republish:
+    name: Republish ${{ matrix.source_image_base }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # Prevent other jobs from stopping if one fails
+      matrix:
+        # Define the base names and corresponding full image URLs
+        include:
+          - source_image_base: provider-family-aws
+            source_image: ghcr.io/crossplane-contrib/provider-family-aws:v1.21.1
+          - source_image_base: provider-aws-ec2
+            source_image: ghcr.io/crossplane-contrib/provider-aws-ec2:v1.21.1
+          - source_image_base: provider-aws-iam
+            source_image: ghcr.io/crossplane-contrib/provider-aws-iam:v1.21.1
+          - source_image_base: provider-aws-memorydb
+            source_image: ghcr.io/crossplane-contrib/provider-aws-memorydb:v1.21.1
+          - source_image_base: provider-aws-s3
+            source_image: ghcr.io/crossplane-contrib/provider-aws-s3:v1.21.1
+          - source_image_base: provider-family-gcp
+            source_image: ghcr.io/crossplane-contrib/provider-family-gcp:v1.12.1
+          # Add more images here following the same pattern:
+          # - source_image_base: <short-name>
+          #   source_image: <full-image-url>:<tag>
+
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Define Image Names for ${{ matrix.source_image_base }}
+        id: images
+        run: |
+          SOURCE_IMAGE="${{ matrix.source_image }}"
+          # Extract the image name part after the last '/' and before the ':'
+          IMAGE_NAME_TAG=$(basename "$SOURCE_IMAGE")
+          # Extract the tag after the ':'
+          IMAGE_TAG="${IMAGE_NAME_TAG##*:}"
+          # Extract the image name before the ':'
+          IMAGE_NAME="${IMAGE_NAME_TAG%%:*}"
+
+          # Construct the target image using the hardcoded repo (kflow-ai), extracted name, and tag
+          TARGET_IMAGE="ghcr.io/kflow-ai/${IMAGE_NAME}:${IMAGE_TAG}"
+
+          echo "source_image=$SOURCE_IMAGE" >> $GITHUB_OUTPUT
+          echo "target_image=$TARGET_IMAGE" >> $GITHUB_OUTPUT
+          echo "Source Image: $SOURCE_IMAGE"
+          echo "Target Image: $TARGET_IMAGE"
+          echo "Parsed Name: $IMAGE_NAME"
+          echo "Parsed Tag: $IMAGE_TAG"
+
+      - name: Pull Source Image ${{ matrix.source_image_base }}
+        run: docker pull ${{ steps.images.outputs.source_image }}
+
+      - name: Tag Image for GHCR (${{ matrix.source_image_base }})
+        run: docker tag ${{ steps.images.outputs.source_image }} ${{ steps.images.outputs.target_image }}
+
+      - name: Push Image to GHCR (${{ matrix.source_image_base }})
+        run: docker push ${{ steps.images.outputs.target_image }}
+
+      - name: Echo success message for ${{ matrix.source_image_base }}
+        run: echo "Successfully republished ${{ steps.images.outputs.source_image }} to ${{ steps.images.outputs.target_image }}"
